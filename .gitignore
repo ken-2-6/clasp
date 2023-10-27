@@ -2,3 +2,6 @@
 build*
 .vscode*
 CMakeLists.txt.user
+/output
+./*.txt
+.DS_Store

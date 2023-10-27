@@ -227,6 +227,8 @@ public:
 
 	//! Adds c as a learnt constraint to the solver.
 	void addLearnt(Constraint* c, uint32 size, ConstraintType type) {
+		if (type == ConstraintType::Other)
+			// printf("---addLearnt---\n");
 		learnts_.push_back(c);
 		stats.addLearnt(size, type);
 	}

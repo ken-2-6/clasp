@@ -231,6 +231,7 @@ void Solver::startInit(uint32 numConsGuess, const SolverParams& params) {
 		else if (!ccMin_)           { ccMin_ = new CCMinRecursive; }
 		if (id == params.id || !shared_->seedSolvers()) {
 			rng.srand(params.seed);
+			// printf("TID%d:n rng.srand(%d)\n", this->id(), params.seed);
 		}
 		else {
 			RNG x(14182940); for (uint32 i = 0; i != id; ++i) { x.rand(); }

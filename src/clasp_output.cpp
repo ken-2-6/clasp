@@ -976,7 +976,7 @@ void TextOutput::printMeta(const OutputTable& out, const Model& m) {
 void TextOutput::printModel(const OutputTable& out, const Model& m, PrintLevel x) {
 	FileLock lock(stdout);
 	if (x == modelQ()) {
-		comment(1, "%s: %" PRIu64"\n", !m.up ? "Answer" : "Update", m.num);
+		comment(1, "%s(%d): %" PRIu64"\n", !m.up ? "Answer" : "Update", m.sId, m.num);
 		printValues(out, m);
 		progress_.clear();
 	}
