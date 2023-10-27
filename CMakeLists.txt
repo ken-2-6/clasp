@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.1)
-project(CLASP VERSION 3.3.9 LANGUAGES CXX)
+project(CLASP VERSION 3.3.12.2 LANGUAGES CXX)
 # Enable folders in IDEs like Visual Studio
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 if (POLICY CMP0063)
@@ -70,7 +70,7 @@ if (CLASP_BUILD_WITH_THREADS)
 	find_package(Threads REQUIRED)
 
 	# Add libatomic if necessary
-	if (CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND CMAKE_USE_PTHREADS_INIT)
+	if (CMAKE_USE_PTHREADS_INIT)
 		include (CheckCXXSourceCompiles)
 		set (OLD_CMAKE_REQUIRED_FLAGS ${CMAKE_REQUIRED_FLAGS})
 		set (OLD_CMAKE_REQUIRED_LIBRARIES ${CMAKE_REQUIRED_LIBRARIES})
@@ -94,6 +94,10 @@ int main() {
 			endif()
 		endif()
 	endif()
+else()
+	set(CMAKE_CXX_STANDARD 98)
+	set(CMAKE_CXX_STANDARD_REQUIRED ON)
+	set(CMAKE_CXX_EXTENSIONS ON)
 endif()
 
 # Check for or build external dependency

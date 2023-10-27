@@ -180,6 +180,7 @@ struct CoreStats {
 #define CLASP_CORE_STATS(STAT, LHS, RHS)     \
 	STAT(uint64 choices;    DOXY(number of choices)     , "choices"           , VALUE(choices)    , LHS.choices    += RHS.choices   )\
 	STAT(uint64 conflicts;  DOXY(number of conflicts)   , "conflicts"         , VALUE(conflicts)  , LHS.conflicts  += RHS.conflicts )\
+	STAT(uint64 propagates;  DOXY(number of propagates) , "propagates"        , VALUE(propagates)  , LHS.propagates  += RHS.propagates )\
 	STAT(uint64 analyzed;   DOXY(number of conflicts analyzed), "conflicts_analyzed", VALUE(analyzed)   , LHS.analyzed   += RHS.analyzed  )\
 	STAT(uint64 restarts;   DOXY(number of restarts)    , "restarts"          , VALUE(restarts)   , LHS.restarts   += RHS.restarts  )\
 	STAT(uint64 lastRestart;DOXY(length of last restart), "restarts_last"     , VALUE(lastRestart), LHS.lastRestart = std::max(LHS.lastRestart, RHS.lastRestart))
@@ -243,9 +244,15 @@ struct ExtendedStats {
 	STAT(uint64 integrated; DOXY(lemmas integrated )         , "integrated"            , VALUE(integrated) , LHS.integrated += RHS.integrated) \
 	STAT(Array learnts;     DOXY(lemmas of each learnt type) , "lemmas"                , MEM_FUN(lemmas)   , NO_ARG)   \
 	STAT(Array lits;        DOXY(lits of each learnt type)   , "lits_learnt"           , MEM_FUN(learntLits), NO_ARG)  \
-	STAT(uint32 binary;     DOXY(number of binary lemmas)    , "lemmas_binary"         , VALUE(binary)  , LHS.binary  += RHS.binary)  \
-	STAT(uint32 ternary;    DOXY(number of ternary lemmas)   , "lemmas_ternary"        , VALUE(ternary) , LHS.ternary += RHS.ternary) \
+	STAT(uint32 unit;       DOXY(number of unit lemmas)      , "lemmas_unit"           , VALUE(unit)        , LHS.unit  += RHS.unit)  \
+	STAT(uint32 binary;     DOXY(number of binary lemmas)    , "lemmas_binary"         , VALUE(binary)      , LHS.binary  += RHS.binary)  \
+	STAT(uint32 ternary;    DOXY(number of ternary lemmas)   , "lemmas_ternary"        , VALUE(ternary)     , LHS.ternary += RHS.ternary) \
 	STAT(double cpuTime;    DOXY(cpu time used )             , "cpu_time"              , VALUE(cpuTime) , LHS.cpuTime += RHS.cpuTime) \
+	STAT(double propTime;   DOXY(propagation cpu time )      , "prop_time"             , VALUE(propTime), LHS.propTime+= RHS.propTime) \
+	STAT(double itgTime;    DOXY(integrate cpu time )        , "integrate_time"        , VALUE(itgTime) , LHS.itgTime += RHS.itgTime) \
+	STAT(double simpTime;   DOXY(simplify cpu time )         , "simplify_time"         , VALUE(simpTime), LHS.simpTime += RHS.simpTime) \
+	STAT(double rslvTime;   DOXY(resolve cpu time )          , "resolve_time"          , VALUE(rslvTime), LHS.rslvTime += RHS.rslvTime) \
+	STAT(double waitTime;   DOXY(wait time sync)             , "wait_time"             , VALUE(waitTime), LHS.waitTime+= RHS.waitTime) \
 	STAT(uint64 intImps;    DOXY(implications on integrating), "integrated_imps"       , VALUE(intImps) , LHS.intImps+= RHS.intImps)  \
 	STAT(uint64 intJumps;   DOXY(backjumps on integrating)   , "integrated_jumps"      , VALUE(intJumps), LHS.intJumps+=RHS.intJumps) \
 	STAT(uint64 gpLits;     DOXY(lits in received gps)       , "guiding_paths_lits"    , VALUE(gpLits)  , LHS.gpLits  += RHS.gpLits)  \
@@ -259,14 +266,24 @@ struct ExtendedStats {
 	STAT(NO_ARG       , "lits_other"     , VALUE(lits[2])    , LHS.lits[2]    += RHS.lits[2])    \
 	STAT(JumpStats jumps;DOXY(backjump statistics)           , "jumps"                 , MAP(jumps)     , LHS.jumps.accu(RHS.jumps))
 
+	// STAT(Array units;       DOXY(unit lemmas)                , "lits_lemmas_binary"    , MEM_FUN(units)     , NO_ARG)  \
+	// STAT(Array binaries;    DOXY(binary lemmas)              , "lits_lemmas_binary"    , MEM_FUN(binaries)  , NO_ARG)  \
+	// STAT(Array ternaries;   DOXY(ternary lemmas)             , "lits_lemmas_ternary"   , MEM_FUN(ternaries) , NO_ARG) \
+	
+
 	ExtendedStats() { reset(); }
 	void reset();
 	void addLearnt(uint32 size, type_t t) {
 		if (t == Constraint_t::Static) return;
 		learnts[t-1]+= 1;
 		lits[t-1]   += size;
+		unit        += (size == 1);
 		binary      += (size == 2);
 		ternary     += (size == 3);
+
+		// units[t-1]  += (size == 1);
+		// binaries[t-1] += (size == 2);
+		// ternaries[t-1]+= (size == 3);
 	}
 	//! Total number of lemmas learnt.
 	uint64 lemmas()        const { return std::accumulate(learnts, learnts+Constraint_t::Type__max, uint64(0)); }
@@ -310,11 +327,17 @@ struct SolverStats : public CoreStats {
 	void addTo(const char* key, StatsMap& solving, StatsMap* accu) const;
 	inline void addLearnt(uint32 size, ConstraintType t);
 	inline void addConflict(uint32 dl, uint32 uipLevel, uint32 bLevel, uint32 lbd);
+	inline void addPropagate();
 	inline void addDeleted(uint32 num);
 	inline void addDistributed(uint32 lbd, ConstraintType t);
 	inline void addTest(bool partial);
 	inline void addModel(uint32 decisionLevel);
 	inline void addCpuTime(double t);
+	inline void addPropTime(double t);
+	inline void addItgTime(double t);
+	inline void addSimpTime(double t);
+	inline void addRslvTime(double t);
+	inline void addWaitTime(double t);
 	inline void addSplit(uint32 num = 1);
 	inline void addDomChoice(uint32 num = 1);
 	inline void addIntegratedAsserting(uint32 receivedDL, uint32 jumpDL);
@@ -332,6 +355,11 @@ inline void SolverStats::addDistributed(uint32 lbd, ConstraintType){ if (extra) 
 inline void SolverStats::addIntegrated(uint32 n)                   { if (extra) { extra->integrated += n;} }
 inline void SolverStats::removeIntegrated(uint32 n)                { if (extra) { extra->integrated -= n;} }
 inline void SolverStats::addCpuTime(double t)                      { if (extra) { extra->cpuTime += t; }    }
+inline void SolverStats::addPropTime(double t)                     { if (extra) { extra->propTime += t; }    }
+inline void SolverStats::addItgTime(double t)                      { if (extra) { extra->itgTime += t; }    }
+inline void SolverStats::addSimpTime(double t)                     { if (extra) { extra->simpTime += t; }    }
+inline void SolverStats::addRslvTime(double t)                     { if (extra) { extra->rslvTime += t; }    }
+inline void SolverStats::addWaitTime(double t)                     { if (extra) { extra->waitTime += t; }    }
 inline void SolverStats::addSplit(uint32 num)                      { if (extra) { extra->splits += num; }  }
 inline void SolverStats::addPath(const LitVec::size_type& sz)      { if (extra) { ++extra->gps; extra->gpLits += sz; } }
 inline void SolverStats::addTest(bool partial)                     { if (extra) { ++extra->hccTests; extra->hccPartial += (uint32)partial; } }
@@ -344,6 +372,9 @@ inline void SolverStats::addConflict(uint32 dl, uint32 uipLevel, uint32 bLevel, 
 	++analyzed;
 	if (limit) { limit->update(dl, lbd); }
 	if (extra) { extra->jumps.update(dl, uipLevel, bLevel); }
+}
+inline void SolverStats::addPropagate() {
+	++propagates;
 }
 #undef CLASP_STAT_DEFINE
 #undef NO_ARG

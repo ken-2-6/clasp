@@ -90,6 +90,8 @@ struct ParallelSolve::SharedData {
 		restartReq  = 0;
 		generator   = 0;
 		errorCode   = 0;
+		if (a_ctx)
+			pcqm.reset(threads, ctx->configuration()->context().margin);
 	}
 	void clearQueue() {
 		while (!workQ.empty()) { delete workQ.pop_ret(); }
@@ -204,6 +206,8 @@ struct ParallelSolve::SharedData {
 	atomic<uint32>   control;     // set of active message flags
 	atomic<uint32>   modCount;    // counter for synchronizing models
 	uint32           errorCode;   // global error code
+
+	PrdClausesQueueMgr pcqm;
 };
 
 // post message to all threads
@@ -279,7 +283,7 @@ bool ParallelSolve::beginSolve(SharedContext& ctx, const LitVec& path) {
 			ctx.distributor.reset(new mt::LocalDistribution(distribution_, ctx.concurrency(), intTopo_));
 		}
 		else {
-			ctx.distributor.reset(new mt::GlobalDistribution(distribution_, ctx.concurrency(), intTopo_));
+			ctx.distributor.reset(new mt::DeterministicDistribution(distribution_, ctx.concurrency(), intTopo_, shared_->pcqm));
 		}
 	}
 	shared_->setControl(SharedData::sync_flag); // force initial sync with all threads
@@ -347,11 +351,13 @@ inline void ParallelSolve::reportProgress(const Solver& s, const char* msg) cons
 // joins with and destroys all active threads
 int ParallelSolve::joinThreads() {
 	uint32 winner = thread_[masterId]->winner() ? uint32(masterId) : UINT32_MAX;
+	uint64 period = thread_[masterId]->winner() ? thread_[masterId]->period() : 0;
 	// detach master only after all client threads are done
 	for (uint32 i = 1, end = shared_->nextId; i != end; ++i) {
 		thread_[i]->join();
 		if (thread_[i]->winner() && i < winner) {
 			winner = i;
+			period = thread_[winner]->period();
 		}
 		Solver* s = &thread_[i]->solver();
 		reportProgress(*s, "joined");
@@ -363,6 +369,7 @@ int ParallelSolve::joinThreads() {
 	}
 	thread_[masterId]->handleTerminateMessage();
 	shared_->ctx->setWinner(winner);
+	shared_->ctx->setWinnerPeriod(period);
 	shared_->nextId = 1;
 	shared_->syncT.stop();
 	reportProgress(MessageEvent(*shared_->ctx->master(), "TERMINATE", MessageEvent::completed, shared_->syncT.total()));
@@ -538,6 +545,7 @@ void ParallelSolve::terminate(Solver& s, bool complete) {
 		if (enumerator().tentative() && complete) {
 			if (shared_->setControl(SharedData::sync_flag|SharedData::complete_flag)) {
 				thread_[s.id()]->setWinner();
+				thread_[s.id()]->setPeriod(s.getPeriod());
 				reportProgress(MessageEvent(s, "SYNC", MessageEvent::sent));
 			}
 		}
@@ -545,9 +553,35 @@ void ParallelSolve::terminate(Solver& s, bool complete) {
 			reportProgress(MessageEvent(s, "TERMINATE", MessageEvent::sent));
 			shared_->postMessage(SharedData::msg_terminate, true);
 			thread_[s.id()]->setWinner();
+			thread_[s.id()]->setPeriod(s.getPeriod());
 			if (complete) { shared_->setControl(SharedData::complete_flag); }
+			shared_->pcqm.terminate();
 		}
 	}
+}
+
+// begin wait Sync
+bool ParallelSolve::syncPeriod(Solver& s) {
+	Timer<RealTime> t;
+	
+	uint64 prd = s.getPeriod();
+	reportProgress(MessageEvent(s, ("syncPeriod: " + std::to_string(prd)).c_str(), MessageEvent::received));
+	
+	t.start();
+	double period_time = shared_->pcqm.get(s.id()).completeAddition(s.id());
+	// ここではまだprdは加算されていない. 
+	shared_->pcqm.prepareNextPeriod(s.id(), prd);
+	t.stop();
+	s.stats.addWaitTime(t.elapsed());
+
+	// LOGを入れ込む
+	// PrdClauses* pc = shared_->pcqm.get(s.id()).get(prd);
+	// reportProgress(PeriodCompleteEvent(s, period_time, pc->getClauseCounter(PrdClauses::Type::UNIT), pc->getClauseCounter(PrdClauses::Type::BINARY), pc->getClauseCounter(PrdClauses::Type::TERNARY), pc->getClauseCounter(PrdClauses::Type::LONG)));
+
+	s.nextPeriod();
+	prd = s.getPeriod();
+	reportProgress(MessageEvent(s, ("syncPeriod: " + std::to_string(prd)).c_str(), MessageEvent::completed, t.elapsed()));
+	return true;
 }
 
 // handles an active synchronization request
@@ -614,12 +648,21 @@ void ParallelSolve::pushWork(LitVec* v) {
 	shared_->pushWork(v);
 }
 
+bool ParallelSolve::synchronizeCommit(Solver& s) {
+	if (shared_->terminate()) { return false; }
+	bool adopt = shared_->pcqm.commitResult(s.id(), s.getPeriod());
+	s.nextPeriod();
+	return adopt;
+}
+
 // called whenever some solver proved unsat
 bool ParallelSolve::commitUnsat(Solver& s) {
 	const int supUnsat = enumerator().unsatType();
 	if (supUnsat == Enumerator::unsat_stop || shared_->terminate() || shared_->synchronize()) {
 		return false;
 	}
+	if (!synchronizeCommit(s)) 
+		return true;
 	unique_lock<mutex> lock(shared_->modelM, defer_lock_t());
 	if (supUnsat == Enumerator::unsat_sync) {
 		lock.lock();
@@ -648,6 +691,9 @@ bool ParallelSolve::commitUnsat(Solver& s) {
 
 // called whenever some solver has found a model
 bool ParallelSolve::commitModel(Solver& s) {
+	if (!synchronizeCommit(s)) 
+		return true;
+
 	// grab lock - models must be processed sequentially
 	// in order to simplify printing and to avoid duplicates
 	// in all non-trivial enumeration modes
@@ -752,6 +798,7 @@ ParallelHandler::ParallelHandler(ParallelSolve& ctrl, Solver& s)
 	, intEnd_(0)
 	, error_(0)
 	, win_(0)
+	, prd_(0)
 	, up_(0) {
 	this->next = this;
 }
@@ -868,6 +915,8 @@ bool ParallelHandler::simplify(Solver& s, bool sh) {
 }
 
 bool ParallelHandler::propagateFixpoint(Solver& s, PostPropagator* ctx) {
+	if (s.completedPeriod()) 
+		ctrl_->syncPeriod(s);
 	// Check for messages and integrate any new information from
 	// models/lemma exchange but only if path is setup.
 	// Skip updates if called from other post propagator so that we do not
@@ -877,7 +926,9 @@ bool ParallelHandler::propagateFixpoint(Solver& s, PostPropagator* ctx) {
 		up  += (act_ == 0 || (up_ && (s.stats.choices & 63) != 0));
 		if (s.stats.conflicts >= gp_.restart)  { ctrl_->requestRestart(); gp_.restart *= 2; }
 		for (uint32 cDL = s.decisionLevel();;) {
+			double timer = ThreadTime::getTime();
 			bool ok = ctrl_->handleMessages(s) && (up > 1 ? integrate(s) : ctrl_->integrateModels(s, gp_.modCount));
+			s.stats.addItgTime(ThreadTime::getTime() - timer);
 			if (!ok)                         { return false; }
 			if (cDL != s.decisionLevel())    { // cancel active propagation on cDL
 				cancelPropagation();
@@ -984,6 +1035,33 @@ uint64 ParallelSolveOptions::initPeerMask(uint32 id, Integration::Topology topo,
 	}
 	assert( (res & (x<<id)) == 0 );
 	return res;
+}
+/////////////////////////////////////////////////////////////////////////////////////////
+// DeterministicDistribution
+/////////////////////////////////////////////////////////////////////////////////////////
+DeterministicDistribution::DeterministicDistribution(const Policy& p, uint32 maxT, uint32 topo, PrdClausesQueueMgr& pcqm) : Distributor(p), pcqm_(pcqm) {
+	assert(maxT <= ParallelSolveOptions::supportedSolvers());
+	maxT_ = maxT;
+}
+DeterministicDistribution::~DeterministicDistribution() {}
+uint32 DeterministicDistribution::receive(const Solver& in, SharedLiterals** out, uint32 maxOut) {
+	uint32 r      = 0;
+	uint64 period = in.getPeriod();
+
+	for (uint32 i=1; period > 0 && i < maxT_; i++) {    // i=0 denote the current thread
+		uint32 target          = (in.id() + i) % maxT_; // target thread number from which clauses are imported
+		PrdClausesQueue& pcq   = pcqm_.get(target);
+		SharedLiterals* clause = NULL;
+		while (r < maxOut && (clause = pcq.pop(in.id(), period - 1)) != NULL) {
+			out[r++] = clause;
+		}
+		// TODO [#C] peersの概念を追加する
+	}
+	return r;
+}
+void DeterministicDistribution::publish(const Solver& s, SharedLiterals* n) {
+	// TODO ClausePairを使うように変更する
+	pcqm_.get(s.id()).get(s.getPeriod())->addClause(n);
 }
 /////////////////////////////////////////////////////////////////////////////////////////
 // GlobalDistribution

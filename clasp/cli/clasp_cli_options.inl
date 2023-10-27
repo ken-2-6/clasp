@@ -99,6 +99,7 @@ OPTION(share, "!,@1", ARG_EXT(defaultsTo("auto")->state(Value::value_defaulted),
        "Configure physical sharing of constraints [%D]\n"\
        "      %A: {auto|problem|learnt|all}", FUN(arg) {ContextParams::ShareMode x; return arg>>x && SET(SELF.shareMode, (uint32)x);}, GET((ContextParams::ShareMode)SELF.shareMode))
 OPTION(learn_explicit, ",@2" , ARG(flag()), "Do not use Short Implication Graph for learning", STORE_FLAG(SELF.shortMode), GET(SELF.shortMode))
+OPTION(margin, "!,@1" , ARG(arg("<n>")), "set <n> period between sync", STORE(SELF.margin), GET(SELF.margin))
 OPTION(sat_prepro    , "!,@1", ARG(arg("<arg>")->implicit("2")),                     \
        "Run SatELite-like preprocessing (Implicit: %I)\n"                            \
        "      %A: <level>[,<limit>...]\n"                                            \

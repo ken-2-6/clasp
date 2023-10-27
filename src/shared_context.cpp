@@ -225,6 +225,13 @@ void ShortImplicationsGraph::resize(uint32 nodes) {
 uint32 ShortImplicationsGraph::numEdges(Literal p) const { return graph_[p.id()].size(); }
 
 bool ShortImplicationsGraph::add(ImpType t, bool learnt, const Literal* lits) {
+	// TODO IGのNGの追加をしていない. 後から見直す
+	// if (learnt) {
+	// 	// printf("ShortImplicationsGraph::add learnt\n");
+	// 	return true;
+	// } else {
+	// 	// printf("ShortImplicationsGraph::add not learnt\n");
+	// }
 	uint32& stats= (t == ternary_imp ? tern_ : bin_)[learnt];
 	Literal p = lits[0], q = lits[1], r = (t == ternary_imp ? lits[2] : lit_false());
 	p.unflag(), q.unflag(), r.unflag();
@@ -310,7 +317,7 @@ void ShortImplicationsGraph::removeTrue(const Solver& s, Literal p) {
 		if (s.value(q.var()) == value_free && s.value(r.var()) == value_free) {
 			// clause is binary on dl 0
 			Literal imp[2] = {q,r};
-			add(binary_imp, false, imp);
+			add(binary_imp, false, imp); // simplifyが非同期で行われてそう
 		}
 		// else: clause is SAT and removed when the satisfied literal is processed
 	}
@@ -383,6 +390,7 @@ void SatPreprocessor::cleanUp(bool full) {
 }
 
 bool SatPreprocessor::addClause(const Literal* lits, uint32 size) {
+	// printf("SatPreprocessor::addClause\n");
 	if (size > 1) {
 		clauses_.push_back( Clause::newClause(lits, size) );
 	}
@@ -811,6 +819,8 @@ void SharedContext::setShareMode(ContextParams::ShareMode m) {
 	}
 }
 void SharedContext::setShortMode(ContextParams::ShortMode m) {
+	if (share_.shortM == ContextParams::ShortMode::short_explicit)
+		return;
 	share_.shortM = static_cast<uint32>(m);
 }
 
@@ -997,6 +1007,9 @@ int SharedContext::addImp(ImpGraph::ImpType t, const Literal* lits, ConstraintTy
 		satPrepro->addClause(lits, static_cast<uint32>(t));
 		return 1;
 	}
+	// printf("addImp %d, size=%d\n", ct, static_cast<uint32>(t));
+	// return 1;
+	
 	return int(btig_.add(t, learnt, lits));
 }
 

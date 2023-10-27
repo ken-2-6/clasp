@@ -30,6 +30,7 @@
 #include <clasp/solver_types.h>
 #include <clasp/solver_strategies.h>
 #include <clasp/shared_context.h>
+// #include <clasp/mt/mutex.h>
 
 namespace Clasp {
 
@@ -105,6 +106,47 @@ public:
 	const OutputTable&      outputTable()   const { return shared_->output; }
 	Literal                 tagLiteral()    const { return tag_; }
 	bool                    isMaster()      const { return this == sharedContext()->master(); }
+
+	// void printLit(const Literal* clause, uint32 size, const char* str = "") { // DEBUG
+	// 	std::string out;
+	// 	out += str;
+	// 	out += "size(" + std::to_string(size) + ") ";
+	// 	for (uint32 i = 0; i < size; ++i) {
+	// 		Literal p = clause[i];
+	// 		if (!validVar(p.var()))
+	// 			out += (p.sign() ? "-" : "") + std::to_string(p.var()) + "(invalid) ";
+	// 		else
+	// 			out += (p.sign() ? "-" : "") + std::to_string(p.var()) + "(" + std::to_string(static_cast<int>(value(p.var()))) + ")@" + std::to_string(level(p.var())) + " ";
+	// 	}
+	// 	printStr(out);
+	// }
+	// void printDeicisonTable() { // DEBUG
+	// 	std::map<int, std::vector<int>> table;
+	// 	for (int i = 0; i < assign_.numVars(); i++) {
+	// 		if (assign_.value(i) != value_free) {
+	// 			table[assign_.level(i)].push_back(i);
+	// 		}
+	// 	}
+	// 	std::string out = "Decision Table\n";
+
+	// 	// sort(table.begin(), table.end());
+	// 	for (auto it = table.begin(); it != table.end(); it++) {
+	// 		out += "level " + std::to_string(it->first) + "| ";
+	// 		for (auto it2 = it->second.begin(); it2 != it->second.end(); it2++) {
+	// 			out += std::to_string(*it2) + " ";
+	// 		}
+	// 		out += "\n";
+	// 	}
+	// 	printStr(out);
+	// }
+
+	// void printStr(const std::string str) {
+	// 	static mt::mutex printM;
+	// 	{
+	// 		mt::lock_guard<mt::mutex> lock(printM);
+	// 		std::cout << "TID" << this->id() << ": " << str << std::endl;
+	// 	}
+	// }
 	/*!
 	 * \name Setup functions
 	 * Functions in this group are typically used before a search is started.
@@ -772,6 +814,11 @@ public:
 	bool  restartReached(const SearchLimits& limit) const;
 	bool  reduceReached(const SearchLimits& limit)  const;
 
+	void nextPeriod();
+	bool completedPeriod();
+	uint64 getPeriod() const { return period_; }
+	uint64 getMemAcc() const { return num_mem_accesses_; } // DEBUG
+
 	//! simplifies cc and returns finalizeConflictClause(cc, info);
 	uint32 simplifyConflictClause(LitVec& cc, ConstraintInfo& info, ClauseHead* rhs);
 	uint32 finalizeConflictClause(LitVec& cc, ConstraintInfo& info, uint32 ccRepMode = 0);
@@ -795,6 +842,7 @@ public:
 	void acquireProblemVars() { acquireProblemVar(numProblemVars());  }
 	//@}
 private:
+	enum { PERIOD_LENGTH = 1000000 };
 	struct DLevel {
 		explicit DLevel(uint32 pos = 0, ConstraintDB* u = 0)
 			: trailPos(pos)
@@ -891,6 +939,9 @@ private:
 	uint32            lastSimp_ :30;// number of top-level assignments on last call to simplify
 	uint32            shufSimp_ : 1;// shuffle db on next simplify?
 	uint32            initPost_ : 1;// initialize new post propagators?
+	uint64			  period_;		// sync timing
+	uint64			  limConf_;		// number of conflicts until next period
+	uint64			  num_mem_accesses_; // number of memory accesses
 };
 inline bool isRevLit(const Solver& s, Literal p, uint32 maxL) {
 	return s.isFalse(p) && (s.seen(p) || s.level(p.var()) < maxL);
@@ -923,6 +974,14 @@ struct NewConflictEvent : SolveEvent<NewConflictEvent> {
 	NewConflictEvent(const Solver& s, const LitVec& c, const ConstraintInfo& i) : SolveEvent<NewConflictEvent>(s, verbosity_quiet), learnt(&c), info(i) {}
 	const LitVec*  learnt; //!< Learnt conflict clause.
 	ConstraintInfo info;   //!< Additional information associated with the conflict clause.
+};
+//! An event type for deubugging period synchronization
+struct PeriodCompleteEvent : SolveEvent<PeriodCompleteEvent> {
+	PeriodCompleteEvent(const Solver& s, double time, uint64 ng1, uint64 ng2, uint64 ng3, uint64 ng4)
+		: SolveEvent<PeriodCompleteEvent>(s, verbosity_high), time(time), ng1(ng1), ng2(ng2), ng3(ng3), ng4(ng4) {
+		}
+	double time;
+	uint64_t ng1, ng2, ng3, ng4;
 };
 //@}
 

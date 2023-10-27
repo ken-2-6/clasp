@@ -371,6 +371,7 @@ void JsonOutput::printCoreStats(const CoreStats& st) {
 	pushObject("Core");
 	printKeyValue("Choices"    , st.choices);
 	printKeyValue("Conflicts"  , st.conflicts);
+	printKeyValue("Propagates"  , st.propagates);
 	printKeyValue("Backtracks" , st.backtracks());
 	printKeyValue("Backjumps"  , st.backjumps());
 	printKeyValue("Restarts"   , st.restarts);
@@ -382,6 +383,11 @@ void JsonOutput::printCoreStats(const CoreStats& st) {
 void JsonOutput::printExtStats(const ExtendedStats& stx, bool generator) {
 	pushObject("More");
 	printKeyValue("CPU", stx.cpuTime);
+	printKeyValue("Wait", stx.waitTime);
+	printKeyValue("Prop", stx.propTime);
+	printKeyValue("Itg", stx.itgTime);
+	printKeyValue("Simp", stx.simpTime);
+	printKeyValue("Rslv", stx.rslvTime);
 	printKeyValue("Models", stx.models);
 	if (stx.domChoices) {
 		printKeyValue("DomChoices", stx.domChoices);
@@ -408,8 +414,9 @@ void JsonOutput::printExtStats(const ExtendedStats& stx, bool generator) {
 		pushObject();
 		printKeyValue("Type", names[i]);
 		if (i == 0) {
-			printKeyValue("Sum", stx.binary+stx.ternary);
-			printKeyValue("Ratio", percent(stx.binary+stx.ternary, stx.lemmas()));
+			printKeyValue("Sum", stx.unit+stx.binary+stx.ternary);
+			printKeyValue("Ratio", percent(stx.unit+stx.binary+stx.ternary, stx.lemmas()));
+			printKeyValue("Unit", stx.unit);
 			printKeyValue("Binary", stx.binary);
 			printKeyValue("Ternary", stx.ternary);
 		}
@@ -673,6 +680,7 @@ void JsonOutput::printSummary(const ClaspFacade::Summary& run, bool final) {
 		if (run.ctx().concurrency() > 1) {
 			printKeyValue("Threads", run.ctx().concurrency());
 			printKeyValue("Winner",  run.ctx().winner());
+			printKeyValue("Period",  run.ctx().winnerPeriod());
 		}
 	}
 }
@@ -830,7 +838,7 @@ void TextOutput::printSummary(const ClaspFacade::Summary& run, bool final) {
 		printKeyValue("CPU Time", "%.3fs\n", run.cpuTime);
 		if (run.ctx().concurrency() > 1) {
 			printKeyValue("Threads", "%-8u", run.ctx().concurrency());
-			printf(" (Winner: %u)\n", run.ctx().winner());
+			printf(" (Winner: %u, Period: %lu)\n", run.ctx().winner(), run.ctx().winnerPeriod());
 		}
 	}
 }
@@ -976,7 +984,7 @@ void TextOutput::printMeta(const OutputTable& out, const Model& m) {
 void TextOutput::printModel(const OutputTable& out, const Model& m, PrintLevel x) {
 	FileLock lock(stdout);
 	if (x == modelQ()) {
-		comment(1, "%s: %" PRIu64"\n", !m.up ? "Answer" : "Update", m.num);
+		comment(1, "%s(%d): %" PRIu64"\n", !m.up ? "Answer" : "Update", m.sId, m.num);
 		printValues(out, m);
 		progress_.clear();
 	}
@@ -1174,10 +1182,17 @@ void TextOutput::visitExternalStats(const StatisticObject& stats) {
 void TextOutput::printStats(const Clasp::SolverStats& st) const {
 	if (!accu_ && st.extra) {
 		printKeyValue("CPU Time", "%.3fs\n", st.extra->cpuTime);
+		printKeyValue("Wait Time", "%.3fs\n", st.extra->waitTime);
+		printKeyValue("Prop Time", "%.3fs\n", st.extra->propTime);
+		printKeyValue("Itg Time", "%.3fs\n", st.extra->itgTime);
+		printKeyValue("Simp Time", "%.3fs\n", st.extra->simpTime);
+		printKeyValue("Rslv Time", "%.3fs\n", st.extra->rslvTime);
 		printKeyValue("Models", "%" PRIu64"\n", st.extra->models);
 	}
 	printKeyValue("Choices", "%-8" PRIu64, st.choices);
 	if (st.extra && st.extra->domChoices) { printf(" (Domain: %" PRIu64")", st.extra->domChoices); }
+	printf("\n");
+	printKeyValue("Propagates", "%-8" PRIu64"", st.propagates);
 	printf("\n");
 	printKeyValue("Conflicts", "%-8" PRIu64"", st.conflicts);
 	printf(" (Analyzed: %" PRIu64")\n", st.backjumps());
@@ -1200,6 +1215,8 @@ void TextOutput::printStats(const Clasp::SolverStats& st) const {
 	uint64 sum = stx.lemmas();
 	printKeyValue("Lemmas", "%-8" PRIu64, sum);
 	printf(" (Deleted: %" PRIu64")\n", stx.deleted);
+	printKeyValue("  Unit", "%-8" PRIu64, uint64(stx.unit));
+	printf(" (Ratio: %6.2f%%)\n", percent(stx.unit, sum));
 	printKeyValue("  Binary", "%-8" PRIu64, uint64(stx.binary));
 	printf(" (Ratio: %6.2f%%)\n", percent(stx.binary, sum));
 	printKeyValue("  Ternary", "%-8" PRIu64, uint64(stx.ternary));

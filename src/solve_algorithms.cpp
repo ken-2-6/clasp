@@ -185,6 +185,7 @@ ValueRep BasicSolve::State::solve(Solver& s, const SolveParams& p, SolveLimits* 
 		cLimit.update(n = std::min(sLimit.used, sLimit.conflicts)); // number of conflicts in this iteration
 		if (result != value_free) {
 			progress.op = static_cast<uint32>(EventType::event_exit);
+			// katsura: modelが見つかった
 			if (result == value_true && p.restart.update() != RestartParams::seq_continue) {
 				if      (p.restart.update() == RestartParams::seq_repeat) { nRestart = 0; }
 				else if (p.restart.update() == RestartParams::seq_disable){ nRestart = UINT32_MAX; }

@@ -61,6 +61,7 @@ set(header
 	${header_path}/clasp_facade.h
 	${header_path}/model_enumerators.h
 	${header_path}/logic_program_types.h
+	${header_path}/prd_multi_queue.h
 	${header_path}/constraint.h)
 set(ide_header "Header Files")
 source_group("${ide_header}" FILES ${header})
@@ -101,6 +102,7 @@ set(src
 	minimize_constraint.cpp
 	model_enumerators.cpp
 	parser.cpp
+	prd_multi_queue.cpp
 	program_builder.cpp
 	satelite.cpp
 	shared_context.cpp

@@ -23,6 +23,7 @@
 //
 #include <clasp/solver.h>
 #include <clasp/clause.h>
+#include <clasp/util/timer.h>
 #include POTASSCO_EXT_INCLUDE(unordered_set)
 namespace Clasp {
 namespace {
@@ -142,7 +143,10 @@ Solver::Solver(SharedContext* ctx, uint32 id)
 	, dbIdx_(0)
 	, lastSimp_(0)
 	, shufSimp_(0)
-	, initPost_(0){
+	, initPost_(0)
+	, limConf_(PERIOD_LENGTH)
+	, num_mem_accesses_(0)
+	, period_(0) {
 	Var trueVar = assign_.addVar();
 	assign_.setValue(trueVar, value_true);
 	markSeen(trueVar);
@@ -231,6 +235,7 @@ void Solver::startInit(uint32 numConsGuess, const SolverParams& params) {
 		else if (!ccMin_)           { ccMin_ = new CCMinRecursive; }
 		if (id == params.id || !shared_->seedSolvers()) {
 			rng.srand(params.seed);
+			// printf("TID%d:n rng.srand(%d)\n", this->id(), params.seed);
 		}
 		else {
 			RNG x(14182940); for (uint32 i = 0; i != id; ++i) { x.rand(); }
@@ -663,6 +668,7 @@ void Solver::destroyDB(ConstraintDB& db) {
 bool Solver::simplify() {
 	if (decisionLevel() != 0) return true;
 	if (hasConflict())        return false;
+	double timer_ = ThreadTime::getTime();
 	if (lastSimp_ != (uint32)assign_.trail.size()) {
 		uint32 old = lastSimp_;
 		if (!simplifySAT()) { return false; }
@@ -670,6 +676,7 @@ bool Solver::simplify() {
 		heuristic_->simplify(*this, old);
 	}
 	if (shufSimp_) { simplifySAT(); }
+	stats.addSimpTime(ThreadTime::getTime() - timer_);
 	return true;
 }
 Var  Solver::pushTagVar(bool pushToRoot) {
@@ -801,11 +808,15 @@ void Solver::cancelPropagation() {
 }
 
 bool Solver::propagate() {
+	stats.addPropagate();
+	double timer_ = ThreadTime::getTime();
 	if (unitPropagate() && postPropagate(postHead_, 0)) {
 		assert(queueSize() == 0);
+		stats.addPropTime(ThreadTime::getTime() - timer_);
 		return true;
 	}
 	cancelPropagation();
+	stats.addPropTime(ThreadTime::getTime() - timer_);
 	return false;
 }
 
@@ -857,6 +868,7 @@ bool Solver::unitPropagate() {
 	const ShortImplicationsGraph& btig = shared_->shortImplications();
 	const uint32 maxIdx = btig.size();
 	while ( !assign_.qEmpty() ) {
+		num_mem_accesses_++;
 		p             = assign_.qPop();
 		idx           = p.id();
 		WatchList& wl = watches_[idx];
@@ -904,6 +916,7 @@ bool Solver::unitPropagate() {
 
 bool Solver::postPropagate(PostPropagator** start, PostPropagator* stop) {
 	for (PostPropagator** r = start, *t; *r != stop;) {
+		num_mem_accesses_++;
 		t = *r;
 		if (!t->propagateFixpoint(*this, stop)) { return false; }
 		assert(queueSize() == 0);
@@ -932,6 +945,7 @@ bool Solver::test(Literal p, PostPropagator* c) {
 
 bool Solver::resolveConflict() {
 	assert(hasConflict());
+	double t = ThreadTime::getTime();
 	if (decisionLevel() > rootLevel()) {
 		if (decisionLevel() != backtrackLevel() && searchMode() != SolverStrategies::no_learning) {
 			uint32 uipLevel = analyzeConflict();
@@ -940,12 +954,15 @@ bool Solver::resolveConflict() {
 				sharedContext()->report(NewConflictEvent(*this, cc_, ccInfo_));
 			}
 			undoUntil( uipLevel );
+			stats.addRslvTime(ThreadTime::getTime() - t);
 			return ClauseCreator::create(*this, cc_, ClauseCreator::clause_no_prepare, ccInfo_);
 		}
 		else {
+			stats.addRslvTime(ThreadTime::getTime() - t);
 			return backtrack();
 		}
 	}
+	stats.addRslvTime(ThreadTime::getTime() - t);
 	return false;
 }
 
@@ -1196,6 +1213,7 @@ uint32 Solver::analyzeConflict() {
 	Antecedent lhs, rhs, last;  // resolve operands
 	const bool doOtfs = strategy_.otfs > 0;
 	for (bumpAct_.clear();;) {
+		num_mem_accesses_++;
 		uint32 lhsSize = resSize;
 		uint32 rhsSize = 0;
 		heuristic_->updateReason(*this, conflict_, p);
@@ -1860,6 +1878,18 @@ bool Solver::isModel() {
 		if (!x->isModel(*this)) { return false; }
 	}
 	return !enumerationConstraint() || enumerationConstraint()->valid(*this);
+}
+/////////////////////////////////////////////////////////////////////////////////////////
+// Sync Period functions
+/////////////////////////////////////////////////////////////////////////////////////////
+void Solver::nextPeriod() {
+	// printf("s:%d num_mem_accesses_:%ld period=%ld limConf_=%ld\n", id(), num_mem_accesses_, period_, limConf_);
+	limConf_ = num_mem_accesses_ + PERIOD_LENGTH;
+	period_++;
+}
+
+bool Solver::completedPeriod() {
+	return num_mem_accesses_ >= limConf_;
 }
 /////////////////////////////////////////////////////////////////////////////////////////
 // Free functions

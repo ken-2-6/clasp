@@ -886,6 +886,8 @@ public:
 
 	uint32   winner()             const   { return share_.winner; }
 	void     setWinner(uint32 sId)        { share_.winner = std::min(sId, concurrency()); }
+	uint64   winnerPeriod()        const  { return share_.period; }
+	void     setWinnerPeriod(uint64 prd)  { share_.period = prd; }
 
 	//! Simplifies the problem constraints w.r.t the master's assignment.
 	void     simplify(LitVec::size_type trailStart, bool shuffle);
@@ -937,6 +939,7 @@ private:
 	struct Share {               // Additional data
 		uint32 count   :10;        //   max number of objects sharing this object
 		uint32 winner  :10;        //   id of solver that terminated the search
+		uint64 period  :64;		   //   period for winner
 		uint32 shareM  : 3;        //   physical sharing mode
 		uint32 shortM  : 1;        //   short clause mode
 		uint32 solveM  : 1;        //   solve mode
@@ -945,7 +948,7 @@ private:
 		uint32 satPreM : 2;        //   preprocessing mode
 		uint32 report  : 2;        //   report mode
 		uint32 reserved: 1;
-		Share() : count(1), winner(0), shareM((uint32)ContextParams::share_auto), shortM(0), solveM(0), frozen(0), seed(0), satPreM(0), report(0) {}
+		Share() : count(1), winner(0), period(0), shareM((uint32)ContextParams::share_auto), shortM(0), solveM(0), frozen(0), seed(0), satPreM(0), report(0) {}
 	}            share_;
 };
 //@}

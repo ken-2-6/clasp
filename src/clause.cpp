@@ -328,7 +328,7 @@ ClauseCreator::Result ClauseCreator::integrate(Solver& s, SharedLiterals* clause
 	assert(!s.hasConflict() && "ClauseCreator::integrate() - precondition violated!");
 	Detail::Sink shared( (modeFlags & clause_no_release) == 0 ? clause : 0);
 	// determine state of clause
-	Literal temp[Clause::MAX_SHORT_LEN]; temp[0] = temp[1] = lit_false();
+	Literal temp[Clause::MAX_SHORT_LEN]; temp[0] = temp[1] = lit_false(); // * nogoodの長さ5以下しか受け取らない？
 	ClauseRep x    = prepare(s, clause->begin(), clause->size(), ConstraintInfo(t), 0, temp, Clause::MAX_SHORT_LEN);
 	uint32 impSize = (modeFlags & clause_explicit) != 0 || !s.allowImplicit(x) ? 1 : 3;
 	Status xs      = status(s, x);
@@ -350,9 +350,14 @@ ClauseCreator::Result ClauseCreator::integrate(Solver& s, SharedLiterals* clause
 		// a local representation for the clause
 		s.stats.addLearnt(x.size, x.info.type());
 		modeFlags |= clause_no_add;
+		// ? 含意グラフはどこで入力を切るんだろう
+		// * つまり, 長さがなんであれdistributeはされており, このif文で輸入処理をするか分けている
+		// * ここでは既に含意グラフを用いて輸入していると考えているためstatsに加算している
 	}
 	if ((modeFlags & clause_no_add) == 0) { s.addLearnt(result.local, x.size, x.info.type()); }
 	if ((xs & (status_unit|status_unsat)) != 0) {
+		// * result.localはリテラルの集合を表している
+		// * 獲得したnogoodがunitかunsatならば
 		Antecedent ante = result.local ? Antecedent(result.local) : Antecedent(~temp[1], ~temp[2]);
 		uint32 impLevel = s.level(temp[1].var());
 		result.status   = s.force(temp[0], impLevel, ante) ? status_unit : status_unsat;

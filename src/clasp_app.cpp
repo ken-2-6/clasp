@@ -688,5 +688,6 @@ void WriteCnf::close() {
 	}
 }
 
+
 }} // end of namespace Clasp::Cli
 

@@ -36,6 +36,7 @@
 #include <clasp/shared_context.h>
 #include <clasp/solver_types.h>
 #include <clasp/util/multi_queue.h>
+#include <clasp/prd_multi_queue.h>
 #include <clasp/mt/thread.h>
 
 /*!
@@ -134,7 +135,9 @@ public:
 	void   requestRestart();
 	bool   handleMessages(Solver& s);
 	bool   integrateModels(Solver& s, uint32& mCount);
+	bool   syncPeriod(Solver& s);
 	void   pushWork(LitVec* gp);
+	bool   synchronizeCommit(Solver& s);
 	bool   commitModel(Solver& s);
 	bool   commitUnsat(Solver& s);
 	enum GpType { gp_none = 0, gp_split = 1, gp_fixed = 2 };
@@ -216,6 +219,8 @@ public:
 	int  error() const   { return (int)error_; }
 	void setWinner()     { win_ = 1; }
 	bool winner() const  { return win_ != 0; }
+	void setPeriod(uint64 p) { prd_ = p; }
+	uint64 period() const { return prd_; }
 	void setThread(Clasp::mt::thread& x) { assert(!joinable()); x.swap(thread_); assert(joinable()); }
 
 	//! True if *this has an associated thread of execution, false otherwise.
@@ -307,10 +312,21 @@ private:
 	uint32            recEnd_;     // where to put next received clause
 	uint32            intEnd_;     // where to put next clause
 	uint32            error_:28;   // error code or 0 if ok
+	uint64			  prd_;        // period of the winner thread
 	uint32            win_  : 1;   // 1 if thread was the first to terminate the search
 	uint32            up_   : 1;   // 1 if next propagate should check for new lemmas/models
 	uint32            act_  : 1;   // 1 if gp is active
 	uint32            lbd_  : 1;   // 1 if integrate should compute lbds
+};
+class DeterministicDistribution : public Distributor {
+public:
+	explicit DeterministicDistribution(const Policy& p, uint32 maxShare, uint32 topo, PrdClausesQueueMgr& pcqm);
+	~DeterministicDistribution();
+	uint32  receive(const Solver& in, SharedLiterals** out, uint32 maxOut);
+	void    publish(const Solver& source, SharedLiterals* n);
+private:
+	PrdClausesQueueMgr& pcqm_;
+	uint32 			   maxT_;
 };
 //! A class that uses a global list to exchange nogoods between threads.
 class GlobalDistribution : public Distributor {
