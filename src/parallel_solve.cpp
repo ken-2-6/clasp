@@ -157,6 +157,32 @@ struct ParallelSolve::SharedData {
 		}
 		return false;
 	}
+	bool notifyAllWaitingThreadsExhangeLearnt() {
+		excSync = false;
+		excCond.notify_all();
+		return true;
+	}
+	bool waitSyncExchangeLearnt() {
+		for (unique_lock<mutex> lock(excM); excWaiting.load() < threads && excSync;) {
+			excWaiting++;
+			excCond.wait(lock);
+			excWaiting--;
+		}
+		return true;
+	}
+	bool notifyAllWaitingThreadsTerminate() {
+		terSync = false;
+		terCond.notify_all();
+		return true;
+	}
+	bool waitSyncTerminate() {
+		for (unique_lock<mutex> lock(terM); terWaiting.load() < threads && terSync;) {
+			terWaiting++;
+			terCond.wait(lock);
+			terWaiting--;
+		}
+		return true;
+	}
 	uint32 leaveAlgorithm() {
 		assert(threads);
 		unique_lock<mutex> lock(workM);
@@ -193,9 +219,15 @@ struct ParallelSolve::SharedData {
 	Timer<RealTime>  syncT;       // thread sync time
 	mutex            modelM;      // model-mutex
 	mutex            workM;       // work-mutex
+	mutex			 excM;   	  // exhange-learnt-mytex
+	mutex			 terM;		  // terminate-mutex
 	ConditionVar     workCond;    // work-condition
+	ConditionVar     excCond; 	  // exchange-learnt-condition
+	ConditionVar 	 terCond;	  // terminate-condition
 	Queue            workQ;       // work-queue (must be protected by workM)
 	uint32           waiting;     // number of worker threads waiting on workCond
+	atomic<uint32>   excWaiting;  // number of worker threads waiting on excCond
+	atomic<uint32>	 terWaiting;  // number of worker threads waiting on terCond
 	uint32           nextId;      // next solver id to use
 	LowerBound       lower;       // last reported lower bound (if any)
 	atomic<uint32>   threads;     // number of threads in the algorithm
@@ -203,6 +235,8 @@ struct ParallelSolve::SharedData {
 	atomic<uint32>   restartReq;  // == numThreads(): restart
 	atomic<uint32>   control;     // set of active message flags
 	atomic<uint32>   modCount;    // counter for synchronizing models
+	atomic<uint32>   excSync;     // is syncronizing
+	atomic<uint32>   terSync;	  // is syncronizing terminate
 	uint32           errorCode;   // global error code
 };
 
@@ -550,6 +584,25 @@ void ParallelSolve::terminate(Solver& s, bool complete) {
 	}
 }
 
+// begin wait Sync
+bool ParallelSolve::beginSync(Solver& s) {
+	// 一つのスレッド以外のスレッドが全て待機状態なら全てを起こす
+	// printf("excWaiting: %d + 1 >= shared_->threads %d \n", shared_->excWaiting, shared_->threads.load());
+	if (shared_->excWaiting.load() + 1 >= shared_->threads) {
+		printf("Solver%d: wake up all\n", s.id());
+		fflush(stdout);
+		shared_->notifyAllWaitingThreadsExhangeLearnt();
+		return true;
+	}
+	printf("Solver%d: waiting... excWaiting=%d #beginSync\n", s.id(), shared_->excWaiting.load());
+	fflush(stdout);
+	// shared_->syncT.start();
+	shared_->excSync = true;
+	bool is = shared_->waitSyncExchangeLearnt();
+	//printf("Solver%d: waitSync %d", s.id(), is);
+	return true;
+}
+
 // handles an active synchronization request
 // returns true to signal that s should restart otherwise false
 bool ParallelSolve::waitOnSync(Solver& s) {
@@ -818,6 +871,7 @@ ValueRep ParallelHandler::solveGP(BasicSolve& solve, GpType t, uint64 restart) {
 		res = solve.solve();
 		up_ = act_ = 0; // de-activate enumerator and bounds
 		fin = true;
+		// katsura: modelを見つけたら出力
 		if      (res == value_true)  { if (ctrl_->commitModel(s)) { fin = false; } }
 		else if (res == value_false) { if (ctrl_->commitUnsat(s)) { fin = false; gp_.reset(restart, gp_.type); } }
 	} while (!fin);
@@ -915,6 +969,13 @@ bool ParallelHandler::isModelLocked(Solver& s) {
 }
 
 bool ParallelHandler::integrate(Solver& s) {
+	// 静的同期
+	if (s.stats.conflicts == 0 || s.stats.conflicts % 1000 != 0) 
+		return true;
+	// printf("Solver%d: conflicts=%lu\n", s.id(), s.stats.conflicts);
+	fflush(stdout);
+	ctrl_->beginSync(s);
+	
 	uint32 rec = recEnd_ + s.receive(received_ + recEnd_, RECEIVE_BUFFER_SIZE - recEnd_);
 	if (!rec) { return true; }
 	ClauseCreator::Result ret;

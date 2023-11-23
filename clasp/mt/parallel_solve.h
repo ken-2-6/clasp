@@ -134,6 +134,7 @@ public:
 	void   requestRestart();
 	bool   handleMessages(Solver& s);
 	bool   integrateModels(Solver& s, uint32& mCount);
+	bool   beginSync(Solver& s);
 	void   pushWork(LitVec* gp);
 	bool   commitModel(Solver& s);
 	bool   commitUnsat(Solver& s);
