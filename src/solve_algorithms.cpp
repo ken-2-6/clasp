@@ -130,6 +130,7 @@ BasicSolve::State::State(Solver& s, const SolveParams& p) {
 ValueRep BasicSolve::State::solve(Solver& s, const SolveParams& p, SolveLimits* lim) {
 	assert(!lim || !lim->reached());
 	const uint32 resetMode = s.enumerationConstraint() ? static_cast<const EnumerationConstraint*>(s.enumerationConstraint())->resetMode() : 0u;
+	// 矛盾があり探索するところがない => 解なし
 	if (s.hasConflict() && s.decisionLevel() == s.rootLevel()) {
 		resetState = resetState || (resetMode & value_false) != 0;
 		return value_false;
@@ -152,6 +153,7 @@ ValueRep BasicSolve::State::solve(Solver& s, const SolveParams& p, SolveLimits* 
 	ScheduleStrategy dbGrow = p.reduce.growSched;
 	Solver::DBInfo  db      = {0,0,dbPinned};
 	ValueRep result         = value_free;
+	// リスタートなどの動作の回数カウント
 	ConflictLimits cLimit   = {dbRed.current() + dbRedInit, dbGrowNext, UINT64_MAX, lim ? lim->conflicts : UINT64_MAX};
 	uint64  limRestarts     = lim ? lim->restarts : UINT64_MAX;
 	if (!dbGrow.disabled())  { dbGrow.advanceTo(nGrow); }
@@ -173,6 +175,7 @@ ValueRep BasicSolve::State::solve(Solver& s, const SolveParams& p, SolveLimits* 
 		sLimit.memory = static_cast<uint64>(p.reduce.memMax)<<20;
 	}
 	uint64 n = 0;
+	// EventTypeはBasicSolverのEventの列挙
 	for (EventType progress(s, EventType::event_restart, 0, 0); cLimit.global; ) {
 		cLimit.restart   = !p.restart.local() ? sLimit.restart.conflicts : UINT64_MAX;
 		sLimit.used      = 0;
@@ -181,6 +184,7 @@ ValueRep BasicSolve::State::solve(Solver& s, const SolveParams& p, SolveLimits* 
 		progress.cLimit  = sLimit.conflicts;
 		progress.lLimit  = sLimit.learnts;
 		if (progress.op) { s.sharedContext()->report(progress); progress.op = (uint32)EventType::event_none; }
+		// ソルバーの探索を始める
 		result = s.search(sLimit, p.randProb);
 		cLimit.update(n = std::min(sLimit.used, sLimit.conflicts)); // number of conflicts in this iteration
 		if (result != value_free) {
