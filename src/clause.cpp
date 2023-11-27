@@ -351,7 +351,7 @@ ClauseCreator::Result ClauseCreator::integrate(Solver& s, SharedLiterals* clause
 		s.stats.addLearnt(x.size, x.info.type());
 		modeFlags |= clause_no_add;
 	}
-	// printf("AddLearnt - ConstraintType: SolverId=%d, size:%d, %d \n", s.id(), x.size, x.info.type());
+	printf("Solver%d: AddLearnt!! size:%d, ConstraintType:%d \n", s.id(), x.size, x.info.type());
 	if ((modeFlags & clause_no_add) == 0) { s.addLearnt(result.local, x.size, x.info.type()); }
 	if ((xs & (status_unit|status_unsat)) != 0) {
 		Antecedent ante = result.local ? Antecedent(result.local) : Antecedent(~temp[1], ~temp[2]);

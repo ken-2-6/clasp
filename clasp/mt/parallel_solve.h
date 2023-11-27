@@ -298,7 +298,10 @@ private:
 			type     = t;
 		}
 	};
-	enum { RECEIVE_BUFFER_SIZE = 32 };
+	enum {
+		RECEIVE_BUFFER_SIZE = 32,
+		PERIOD_LENGTH = 100
+	};
 	Clasp::mt::thread thread_;     // active thread or empty for master
 	GP                gp_;         // active guiding path
 	ParallelSolve*    ctrl_;       // message source
@@ -312,6 +315,9 @@ private:
 	uint32            up_   : 1;   // 1 if next propagate should check for new lemmas/models
 	uint32            act_  : 1;   // 1 if gp is active
 	uint32            lbd_  : 1;   // 1 if integrate should compute lbds
+	uint64			  limConf_;     // number of conflicts until next period
+	uint32			  prd_;	        // period of the solver
+
 };
 //! A class that uses a global list to exchange nogoods between threads.
 class GlobalDistribution : public Distributor {

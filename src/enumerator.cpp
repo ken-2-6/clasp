@@ -122,6 +122,7 @@ bool EnumerationConstraint::update(Solver& s) {
 	return false;
 }
 bool EnumerationConstraint::integrateNogoods(Solver& s) {
+	return true;
 	if (!queue_.get() || s.hasConflict()) { return !s.hasConflict(); }
 	const uint32 f = ClauseCreator::clause_no_add | ClauseCreator::clause_no_release | ClauseCreator::clause_explicit;
 	for (SharedLiterals* clause; queue_->pop(clause); ) {
